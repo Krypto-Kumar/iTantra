@@ -57,7 +57,7 @@ fun SettingsScreen(
     onMicrophonePermissionClick: () -> Unit = {},
     onBluetoothPermissionClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
-    onHowItWorksClick: () -> Unit = {}
+
 ) {
 
     var speakingLanguage by remember {
@@ -294,11 +294,7 @@ fun SettingsScreen(
 
                 SettingsDivider()
 
-                SettingsNavigationRow(
-                    title = "How iTANTRA Works",
-                    value = "",
-                    onClick = onHowItWorksClick
-                )
+
             }
             Spacer(
                 modifier = Modifier.height(40.dp)

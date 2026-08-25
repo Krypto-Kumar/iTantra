@@ -7,35 +7,49 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+
 import com.iTantra.app.audio.AudioPlayer
 import com.iTantra.app.audio.AudioRecorder
+import com.iTantra.app.domain.Language
+
 import com.iTantra.app.ml.stt.SherpaSttEngine
 import com.iTantra.app.ml.tts.PiperTtsEngine
+
+import com.iTantra.app.room.RoomManager
+
+import com.iTantra.app.security.EncryptionManager
+
 import com.iTantra.app.transport.bluetooth.BluetoothPermissionHelper
 import com.iTantra.app.transport.connection.CommunicationService
 import com.iTantra.app.transport.connection.ConnectionState
 import com.iTantra.app.transport.protocol.Message
-import com.iTantra.app.domain.Language
+
 import com.iTantra.app.ui.about.AboutScreen
-import com.iTantra.app.ui.about.HowItWorksScreen
 import com.iTantra.app.ui.connect.ConnectDeviceScreen
 import com.iTantra.app.ui.connect.ConnectingScreen
 import com.iTantra.app.ui.onboarding.PermissionScreen
 import com.iTantra.app.ui.radio.MainRadioScreen
 import com.iTantra.app.ui.radio.RadioState
+import com.iTantra.app.ui.room.CreateRoomScreen
+import com.iTantra.app.ui.room.JoinRoomScreen
+import com.iTantra.app.ui.room.RoomScreen
+import com.iTantra.app.ui.room.RoomSessionScreen
 import com.iTantra.app.ui.settings.SettingsScreen
 import com.iTantra.app.ui.splash.SplashScreen
 import com.iTantra.app.ui.theme.ITantraTheme
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,64 +57,142 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
 import java.util.UUID
 
 
+// =============================================================
+// APP SCREENS
+// =============================================================
+
 private enum class AppScreen {
+
     SPLASH,
+
     PERMISSIONS,
+
     CONNECT,
+
     CONNECTING,
+
     RADIO,
+
     SETTINGS,
+
     ABOUT,
-    HOW_IT_WORKS
+
+    ROOM,
+
+    CREATE_ROOM,
+
+    JOIN_ROOM,
+
+    ROOM_SESSION
 }
 
 
+// =============================================================
+// MAIN ACTIVITY
+// =============================================================
+
 class MainActivity : ComponentActivity() {
 
-    // =====================================================
+
+    // =========================================================
     // AUDIO / ML
-    // =====================================================
+    // =========================================================
 
     private val audioRecorder by lazy {
-        AudioRecorder(applicationContext)
+
+        AudioRecorder(
+            applicationContext
+        )
     }
 
+
     private val audioPlayer by lazy {
+
         AudioPlayer()
     }
 
+
     private val sttEngine by lazy {
-        SherpaSttEngine(applicationContext)
+
+        SherpaSttEngine(
+            applicationContext
+        )
     }
+
 
     private val ttsEngine by lazy {
-        PiperTtsEngine(applicationContext)
+
+        PiperTtsEngine(
+            applicationContext
+        )
     }
 
-    private var recordingJob: Job? = null
+
+    private var recordingJob: Job? =
+        null
 
 
-    // =====================================================
-    // BLUETOOTH
-    // =====================================================
+    // =========================================================
+    // COMMUNICATION
+    // =========================================================
 
     private val communicationScope =
         CoroutineScope(
-            SupervisorJob() + Dispatchers.Main
+            SupervisorJob() +
+                    Dispatchers.Main
         )
+
 
     private val communicationService =
         CommunicationService(
-            scope = communicationScope
+            scope =
+                communicationScope
         )
 
 
-    // =====================================================
-    // PERMISSION LAUNCHERS
-    // =====================================================
+    // =========================================================
+    // ENCRYPTION
+    // =========================================================
+
+    /*
+     * One EncryptionManager for this application instance.
+     *
+     * It owns:
+     * - P2P key exchange
+     * - Room key management
+     * - message encryption/decryption
+     */
+    private val encryptionManager by lazy {
+
+        EncryptionManager()
+    }
+
+
+    // =========================================================
+    // ROOM MANAGER
+    // =========================================================
+
+    /*
+     * RoomManager uses the same EncryptionManager.
+     *
+     * Therefore creating a Room automatically creates
+     * its Room encryption key.
+     */
+    private val roomManager by lazy {
+
+        RoomManager(
+            encryptionManager
+        )
+    }
+
+
+    // =========================================================
+    // PERMISSIONS
+    // =========================================================
 
     private val microphonePermissionLauncher =
         registerForActivityResult(
@@ -109,15 +201,8 @@ class MainActivity : ComponentActivity() {
 
             Log.d(
                 "PERMISSION",
-                "Microphone permission result: $granted"
+                "Microphone permission: $granted"
             )
-
-            if (!granted) {
-                Log.w(
-                    "PERMISSION",
-                    "Microphone permission was denied"
-                )
-            }
         }
 
 
@@ -128,118 +213,84 @@ class MainActivity : ComponentActivity() {
 
             Log.d(
                 "PERMISSION",
-                "Bluetooth permission result: $permissions"
+                "Bluetooth permissions: $permissions"
             )
         }
 
 
-    // =====================================================
-    // REQUEST MICROPHONE PERMISSION
-    // =====================================================
+    // =========================================================
+    // MICROPHONE PERMISSION
+    // =========================================================
 
     private fun requestMicrophonePermission() {
 
         val permission =
             Manifest.permission.RECORD_AUDIO
 
+
         val granted =
             ContextCompat.checkSelfPermission(
                 this,
                 permission
-            ) == PackageManager.PERMISSION_GRANTED
+            ) ==
+                    PackageManager.PERMISSION_GRANTED
+
 
         if (!granted) {
 
-            Log.d(
-                "PERMISSION",
-                "Requesting microphone permission"
-            )
-
             microphonePermissionLauncher.launch(
                 permission
-            )
-
-        } else {
-
-            Log.d(
-                "PERMISSION",
-                "Microphone permission already granted"
             )
         }
     }
 
 
-    // =====================================================
-    // REQUEST BLUETOOTH PERMISSIONS
-    // =====================================================
+    // =========================================================
+    // BLUETOOTH PERMISSION
+    // =========================================================
 
     private fun requestBluetoothPermissions() {
-
-        /*
-         * Android 12+ introduced runtime Bluetooth
-         * permissions.
-         */
 
         if (
             android.os.Build.VERSION.SDK_INT >=
             android.os.Build.VERSION_CODES.S
         ) {
 
-            val requiredPermissions =
+            val permissions =
                 arrayOf(
+
                     Manifest.permission.BLUETOOTH_SCAN,
+
                     Manifest.permission.BLUETOOTH_CONNECT,
+
                     Manifest.permission.BLUETOOTH_ADVERTISE
                 )
 
-            val missingPermissions =
-                requiredPermissions.filter { permission ->
+
+            val missing =
+                permissions.filter {
 
                     ContextCompat.checkSelfPermission(
                         this,
-                        permission
-                    ) != PackageManager.PERMISSION_GRANTED
+                        it
+                    ) !=
+                            PackageManager.PERMISSION_GRANTED
                 }
 
-            if (missingPermissions.isNotEmpty()) {
 
-                Log.d(
-                    "PERMISSION",
-                    "Requesting Bluetooth permissions: " +
-                            missingPermissions
-                )
+            if (missing.isNotEmpty()) {
 
                 bluetoothPermissionLauncher.launch(
-                    missingPermissions.toTypedArray()
-                )
-
-            } else {
-
-                Log.d(
-                    "PERMISSION",
-                    "Bluetooth permissions already granted"
+                    missing.toTypedArray()
                 )
             }
-
-        } else {
-
-            /*
-             * On Android versions below 12, Bluetooth
-             * permissions are normally handled as install-time
-             * permissions through the manifest.
-             */
-
-            Log.d(
-                "PERMISSION",
-                "Android < 12: runtime Bluetooth permission not required"
-            )
         }
     }
 
 
-    // =====================================================
-    // REQUEST ALL RUNTIME PERMISSIONS
-    // =====================================================
+    // =========================================================
+    // ALL PERMISSIONS
+    // =========================================================
 
     private fun requestAllPermissions() {
 
@@ -249,22 +300,20 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    // =====================================================
-    // START BLUETOOTH SERVER
-    // =====================================================
+    // =========================================================
+    // BLUETOOTH SERVER
+    // =========================================================
 
     private fun startBluetoothServer() {
 
         try {
 
-            Log.d(
-                "BLUETOOTH",
-                "Starting RFCOMM server"
-            )
+            communicationService
+                .startServer()
 
-            communicationService.startServer()
-
-        } catch (e: SecurityException) {
+        } catch (
+            e: SecurityException
+        ) {
 
             Log.e(
                 "BLUETOOTH",
@@ -272,7 +321,9 @@ class MainActivity : ComponentActivity() {
                 e
             )
 
-        } catch (e: Exception) {
+        } catch (
+            e: Exception
+        ) {
 
             Log.e(
                 "BLUETOOTH",
@@ -283,61 +334,115 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    // =====================================================
+    // =========================================================
     // ON CREATE
-    // =====================================================
+    // =========================================================
 
     override fun onCreate(
         savedInstanceState: Bundle?
     ) {
 
-        super.onCreate(savedInstanceState)
+        super.onCreate(
+            savedInstanceState
+        )
 
-        /*
-         * IMPORTANT:
-         *
-         * We intentionally do NOT request permissions here.
-         *
-         * The user reaches PermissionScreen first and presses
-         * Continue. That action starts the permission requests.
-         */
 
         setContent {
 
             ITantraTheme {
 
+
+                // =================================================
+                // NAVIGATION STATE
+                // =================================================
+
                 var screen by remember {
+
                     mutableStateOf(
                         AppScreen.SPLASH
                     )
                 }
 
+
+                // =================================================
+                // DEVICE
+                // =================================================
+
                 var selectedDevice by remember {
+
                     mutableStateOf("")
                 }
 
+
                 var selectedBluetoothDevice by remember {
-                    mutableStateOf<BluetoothDevice?>(null)
+
+                    mutableStateOf<BluetoothDevice?>(
+                        null
+                    )
                 }
 
+
+                // =================================================
+                // RADIO STATE
+                // =================================================
+
                 var radioState by remember {
+
                     mutableStateOf(
                         RadioState.READY
                     )
                 }
 
-                /*
-                 * Current presentation build is Hindi-only.
-                 */
+
+                // =================================================
+                // CURRENT LANGUAGE
+                //
+                // Hindi-only for current demo.
+                // Language selection can be connected later.
+                // =================================================
+
                 val speakingLanguage =
                     Language.HINDI
+
 
                 val listeningLanguage =
                     Language.HINDI
 
 
                 // =================================================
-                // BLUETOOTH STATE OBSERVER
+                // ROOM STATE
+                // =================================================
+
+                var activeRoomId by remember {
+
+                    mutableStateOf("")
+                }
+
+
+                var activeRoomName by remember {
+
+                    mutableStateOf("")
+                }
+
+
+                var roomParticipantCount by remember {
+
+                    mutableIntStateOf(0)
+                }
+
+
+                // =================================================
+                // ROOM CREATION ERROR
+                // =================================================
+
+                var roomCreationError by remember {
+
+                    mutableStateOf<String?>(null)
+                }
+
+
+                // =================================================
+                // BLUETOOTH STATE
                 // =================================================
 
                 LaunchedEffect(Unit) {
@@ -351,14 +456,10 @@ class MainActivity : ComponentActivity() {
                                 "Connection state: $state"
                             )
 
+
                             when (state) {
 
                                 ConnectionState.CONNECTED -> {
-
-                                    Log.d(
-                                        "BLUETOOTH",
-                                        "CONNECTED"
-                                    )
 
                                     radioState =
                                         RadioState.READY
@@ -367,15 +468,12 @@ class MainActivity : ComponentActivity() {
                                         AppScreen.RADIO
                                 }
 
-                                ConnectionState.ERROR -> {
 
-                                    Log.e(
-                                        "BLUETOOTH",
-                                        "Connection ERROR"
-                                    )
+                                ConnectionState.ERROR -> {
 
                                     radioState =
                                         RadioState.ERROR
+
 
                                     if (
                                         screen ==
@@ -387,17 +485,13 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
+
                                 ConnectionState.DISCONNECTED -> {
 
                                     if (
                                         screen ==
                                         AppScreen.CONNECTING
                                     ) {
-
-                                        Log.d(
-                                            "BLUETOOTH",
-                                            "Connection failed"
-                                        )
 
                                         radioState =
                                             RadioState.ERROR
@@ -407,8 +501,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
 
+
                                 else -> {
-                                    // WAITING / CONNECTING /
+                                    // CONNECTING / WAITING /
                                     // UNAVAILABLE
                                 }
                             }
@@ -426,19 +521,14 @@ class MainActivity : ComponentActivity() {
                         .incomingMessages
                         .collect { message ->
 
-                            Log.d(
-                                "BLUETOOTH",
-                                "Received message: " +
-                                        message.text
-                            )
 
-                            if (message.text.isBlank()) {
-                                Log.w(
-                                    "BLUETOOTH",
-                                    "Received empty message, skipping TTS"
-                                )
+                            if (
+                                message.text.isBlank()
+                            ) {
+
                                 return@collect
                             }
+
 
                             communicationScope.launch(
                                 Dispatchers.Default
@@ -455,11 +545,6 @@ class MainActivity : ComponentActivity() {
                                     }
 
 
-                                    /*
-                                     * Current presentation build:
-                                     * Hindi TTS.
-                                     */
-
                                     if (
                                         message.language ==
                                         Language.HINDI.code
@@ -473,38 +558,28 @@ class MainActivity : ComponentActivity() {
                                                 RadioState.PLAYING
                                         }
 
-                                        Log.d(
-                                            "REMOTE_TTS",
-                                            "Generating Hindi TTS: " +
+
+                                        val audio =
+                                            ttsEngine
+                                                .synthesize(
                                                     message.text
-                                        )
+                                                )
 
-                                        val ttsAudio =
-                                            ttsEngine.synthesize(
-                                                message.text
-                                            )
 
-                                        if (ttsAudio.samples.isNotEmpty()) {
+                                        if (
+                                            audio.samples.isNotEmpty()
+                                        ) {
 
                                             audioPlayer.play(
+
                                                 samples =
-                                                    ttsAudio.samples,
+                                                    audio.samples,
 
                                                 sampleRate =
-                                                    ttsAudio.sampleRate
-                                            )
-
-                                            Log.d(
-                                                "REMOTE_TTS",
-                                                "Playback completed"
-                                            )
-                                        } else {
-
-                                            Log.w(
-                                                "REMOTE_TTS",
-                                                "TTS generated 0 samples"
+                                                    audio.sampleRate
                                             )
                                         }
+
 
                                         Handler(
                                             Looper.getMainLooper()
@@ -516,12 +591,6 @@ class MainActivity : ComponentActivity() {
 
                                     } else {
 
-                                        Log.w(
-                                            "REMOTE_TTS",
-                                            "Unsupported language: " +
-                                                    message.language
-                                        )
-
                                         Handler(
                                             Looper.getMainLooper()
                                         ).post {
@@ -531,13 +600,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
 
-                                } catch (e: Exception) {
+                                } catch (
+                                    e: Exception
+                                ) {
 
                                     Log.e(
-                                        "REMOTE_TTS",
-                                        "TTS processing failed",
+                                        "TTS",
+                                        "TTS failed",
                                         e
                                     )
+
 
                                     Handler(
                                         Looper.getMainLooper()
@@ -553,10 +625,11 @@ class MainActivity : ComponentActivity() {
 
 
                 // =================================================
-                // SCREEN NAVIGATION
+                // SCREEN ROUTER
                 // =================================================
 
                 when (screen) {
+
 
                     // =================================================
                     // SPLASH
@@ -566,9 +639,11 @@ class MainActivity : ComponentActivity() {
 
                         SplashScreen()
 
+
                         LaunchedEffect(Unit) {
 
                             delay(1400)
+
 
                             screen =
                                 AppScreen.PERMISSIONS
@@ -586,11 +661,6 @@ class MainActivity : ComponentActivity() {
 
                             onContinue = {
 
-                                Log.d(
-                                    "PERMISSION",
-                                    "Permission screen Continue pressed"
-                                )
-
                                 requestAllPermissions()
 
                                 screen =
@@ -606,11 +676,6 @@ class MainActivity : ComponentActivity() {
 
                     AppScreen.CONNECT -> {
 
-                        /*
-                         * Start the server when we reach the
-                         * Connect screen.
-                         */
-
                         LaunchedEffect(Unit) {
 
                             startBluetoothServer()
@@ -622,30 +687,25 @@ class MainActivity : ComponentActivity() {
                             devices =
                                 getPairedDeviceNames(),
 
-                            onDeviceClick = { deviceName ->
+                            onDeviceClick = {
 
-                                Log.d(
-                                    "BLUETOOTH",
-                                    "Selected device: $deviceName"
-                                )
+                                    deviceName ->
+
 
                                 selectedDevice =
                                     deviceName
+
 
                                 selectedBluetoothDevice =
                                     findPairedDevice(
                                         deviceName
                                     )
 
+
                                 if (
                                     selectedBluetoothDevice ==
                                     null
                                 ) {
-
-                                    Log.e(
-                                        "BLUETOOTH",
-                                        "Could not find selected device"
-                                    )
 
                                     radioState =
                                         RadioState.ERROR
@@ -653,15 +713,17 @@ class MainActivity : ComponentActivity() {
                                     return@ConnectDeviceScreen
                                 }
 
+
                                 screen =
                                     AppScreen.CONNECTING
                             },
+
 
                             onScanAgain = {
 
                                 Log.d(
                                     "BLUETOOTH",
-                                    "Scan again requested"
+                                    "Scan requested"
                                 )
                             }
                         )
@@ -675,6 +737,7 @@ class MainActivity : ComponentActivity() {
                     AppScreen.CONNECTING -> {
 
                         ConnectingScreen(
+
                             deviceName =
                                 selectedDevice
                         )
@@ -687,15 +750,10 @@ class MainActivity : ComponentActivity() {
                             val device =
                                 selectedBluetoothDevice
 
-                            if (device == null) {
 
-                                Log.e(
-                                    "BLUETOOTH",
-                                    "No BluetoothDevice selected"
-                                )
-
-                                radioState =
-                                    RadioState.ERROR
+                            if (
+                                device == null
+                            ) {
 
                                 screen =
                                     AppScreen.CONNECT
@@ -703,34 +761,17 @@ class MainActivity : ComponentActivity() {
                                 return@LaunchedEffect
                             }
 
-                            try {
 
-                                Log.d(
-                                    "BLUETOOTH",
-                                    "Connecting to: " +
-                                            selectedDevice
-                                )
+                            try {
 
                                 communicationService
                                     .connectToDevice(
                                         device
                                     )
 
-                            } catch (e: SecurityException) {
-
-                                Log.e(
-                                    "BLUETOOTH",
-                                    "Bluetooth permission error",
-                                    e
-                                )
-
-                                radioState =
-                                    RadioState.ERROR
-
-                                screen =
-                                    AppScreen.CONNECT
-
-                            } catch (e: Exception) {
+                            } catch (
+                                e: Exception
+                            ) {
 
                                 Log.e(
                                     "BLUETOOTH",
@@ -738,8 +779,10 @@ class MainActivity : ComponentActivity() {
                                     e
                                 )
 
+
                                 radioState =
                                     RadioState.ERROR
+
 
                                 screen =
                                     AppScreen.CONNECT
@@ -762,11 +805,54 @@ class MainActivity : ComponentActivity() {
                             connectedDevice =
                                 selectedDevice,
 
+                            connectedDeviceCount =
+                                if (
+                                    selectedDevice.isBlank()
+                                ) {
+                                    0
+                                } else {
+                                    1
+                                },
+
                             speakingLanguage =
                                 speakingLanguage.displayName,
 
                             listeningLanguage =
                                 listeningLanguage.displayName,
+
+
+                            onSpeakingLanguageChange = {
+
+                                /*
+                                 * Language model switching will be
+                                 * implemented later.
+                                 */
+                            },
+
+
+                            onListeningLanguageChange = {
+
+                                /*
+                                 * Language model switching will be
+                                 * implemented later.
+                                 */
+                            },
+
+
+                            onRoomClick = {
+
+                                screen =
+                                    AppScreen.ROOM
+                            },
+
+
+                            onHistoryClick = {
+
+                                /*
+                                 * History integration is our next task.
+                                 */
+                            },
+
 
                             onSettingsClick = {
 
@@ -774,256 +860,385 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.SETTINGS
                             },
 
+
+                            onAboutClick = {
+
+                                screen =
+                                    AppScreen.ABOUT
+                            },
+
+
+                            onStartTalking = {
+
+                                startRecording(
+                                    type = "NORMAL",
+                                    targetRoomId = null,
+
+                                    onFinished = {
+                                        radioState =
+                                            RadioState.READY
+                                    },
+
+                                    onError = {
+                                        radioState =
+                                            RadioState.ERROR
+                                    }
+                                )
+                            },
+
+
+                            onStopTalking = {
+
+                                stopRecording()
+                            }
+                        )
+                    }
+
+
+                    // =================================================
+                    // ROOM HOME
+                    // =================================================
+
+                    AppScreen.ROOM -> {
+
+                        RoomScreen(
+
+                            onBackClick = {
+
+                                screen =
+                                    AppScreen.RADIO
+                            },
+
+
+                            onCreateRoomClick = {
+
+                                roomCreationError =
+                                    null
+
+                                screen =
+                                    AppScreen.CREATE_ROOM
+                            },
+
+
+                            onJoinRoomClick = {
+
+                                screen =
+                                    AppScreen.JOIN_ROOM
+                            }
+                        )
+                    }
+
+
+                    // =================================================
+                    // CREATE ROOM
+                    // =================================================
+
+                    AppScreen.CREATE_ROOM -> {
+
+                        CreateRoomScreen(
+
+                            onBackClick = {
+
+                                roomCreationError =
+                                    null
+
+                                screen =
+                                    AppScreen.ROOM
+                            },
+
+
+                            generatedRoomId =
+                                if (
+                                    activeRoomId.isBlank()
+                                ) {
+                                    null
+                                } else {
+                                    activeRoomId
+                                },
+
+
+                            errorMessage =
+                                roomCreationError,
+
+
                             // -----------------------------------------
-                            // START TALKING
+                            // BACKEND CREATION
                             // -----------------------------------------
+
+                            onCreateRoom = {
+
+                                    roomName ->
+
+
+                                roomCreationError =
+                                    null
+
+
+                                try {
+
+                                    /*
+                                     * THIS is where the backend creates
+                                     * the Room ID.
+                                     *
+                                     * The UI does not generate it.
+                                     */
+
+                                    val result =
+                                        roomManager.createRoom(
+
+                                            roomName =
+                                                roomName,
+
+                                            hostId =
+                                                encryptionManager
+                                                    .localNodeId
+                                        )
+
+
+                                    /*
+                                     * Backend-generated Room ID.
+                                     */
+
+                                    activeRoomId =
+                                        result.room.roomId
+
+
+                                    activeRoomName =
+                                        result.room.roomName
+
+
+                                    roomParticipantCount =
+                                        result.room.members.size
+
+
+                                    Log.d(
+                                        "ROOM",
+                                        "Room created: " +
+                                                activeRoomId
+                                    )
+
+
+                                } catch (
+                                    e: Exception
+                                ) {
+
+                                    Log.e(
+                                        "ROOM",
+                                        "Failed to create room",
+                                        e
+                                    )
+
+
+                                    roomCreationError =
+                                        e.message
+                                            ?: "Failed to create room"
+                                }
+                            },
+
+
+                            // -----------------------------------------
+                            // CONTINUE
+                            // -----------------------------------------
+
+                            onContinueToRoom = {
+
+                                if (
+                                    activeRoomId.isNotBlank()
+                                ) {
+
+                                    screen =
+                                        AppScreen.ROOM_SESSION
+                                }
+                            }
+                        )
+                    }
+
+
+                    // =================================================
+                    // JOIN ROOM
+                    // =================================================
+
+                    AppScreen.JOIN_ROOM -> {
+
+                        JoinRoomScreen(
+
+                            onBackClick = {
+
+                                screen =
+                                    AppScreen.ROOM
+                            },
+
+
+                            onJoinRoom = {
+
+                                    roomId ->
+
+                                /*
+                                 * The actual remote Room join/key
+                                 * exchange will be connected through
+                                 * RoomProtocol next.
+                                 *
+                                 * For now preserve the entered ID.
+                                 */
+
+                                activeRoomId =
+                                    roomId
+
+                                activeRoomName =
+                                    ""
+
+                                roomParticipantCount =
+                                    1
+
+                                screen =
+                                    AppScreen.ROOM_SESSION
+                            }
+                        )
+                    }
+
+
+                    // =================================================
+                    // ROOM SESSION
+                    // =================================================
+
+                    AppScreen.ROOM_SESSION -> {
+
+                        RoomSessionScreen(
+
+                            roomId =
+                                activeRoomId,
+
+                            roomName =
+                                activeRoomName,
+
+                            participantCount =
+                                roomParticipantCount,
+
+                            state =
+                                radioState,
+
+                            speakingLanguage =
+                                speakingLanguage.displayName,
+
+                            listeningLanguage =
+                                listeningLanguage.displayName,
+
+
+                            onSpeakingLanguageChange = {
+
+                                /*
+                                 * WIP.
+                                 */
+                            },
+
+
+                            onListeningLanguageChange = {
+
+                                /*
+                                 * WIP.
+                                 */
+                            },
+
 
                             onStartTalking = {
 
                                 if (
-                                    radioState ==
-                                    RadioState.READY
+                                    activeRoomId.isNotBlank()
                                 ) {
 
-                                    Log.d(
-                                        "RADIO",
-                                        "Talk button pressed - starting recording"
-                                    )
+                                    startRecording(
 
-                                    radioState =
-                                        RadioState.LISTENING
+                                        type = "ROOM",
 
-                                    recordingJob =
-                                        communicationScope.launch(
-                                            Dispatchers.Default
-                                        ) {
+                                        targetRoomId =
+                                            activeRoomId,
 
-                                            try {
+                                        onFinished = {
 
-                                                // =============================
-                                                // RECORD (Captures immediately)
-                                                // =============================
+                                            radioState =
+                                                RadioState.READY
+                                        },
 
-                                                Log.d(
-                                                    "AUDIO",
-                                                    "Recording audio for up to 3 seconds"
-                                                )
+                                        onError = {
 
-                                                val audio =
-                                                    audioRecorder.record(
-                                                        3000
-                                                    )
-
-                                                Log.d(
-                                                    "AUDIO",
-                                                    "Recorded " +
-                                                            "${audio.samples.size} samples"
-                                                )
-
-
-                                                // =============================
-                                                // PROCESSING
-                                                // =============================
-
-                                                Handler(
-                                                    Looper.getMainLooper()
-                                                ).post {
-
-                                                    radioState =
-                                                        RadioState.PROCESSING
-                                                }
-
-
-                                                // =============================
-                                                // STT
-                                                // =============================
-
-                                                Log.d(
-                                                    "STT",
-                                                    "Starting Dolphin STT"
-                                                )
-
-                                                val text =
-                                                    sttEngine.transcribe(
-                                                        audio
-                                                    )
-
-                                                Log.d(
-                                                    "STT_RESULT",
-                                                    "Language=" +
-                                                            speakingLanguage.code +
-                                                            ", text=[$text]"
-                                                )
-
-
-                                                if (
-                                                    text.isBlank()
-                                                ) {
-
-                                                    Log.d(
-                                                        "STT",
-                                                        "Recognized text is blank, resetting to READY"
-                                                    )
-
-                                                    Handler(
-                                                        Looper.getMainLooper()
-                                                    ).post {
-
-                                                        radioState =
-                                                            RadioState.READY
-                                                    }
-
-                                                    return@launch
-                                                }
-
-
-                                                // =============================
-                                                // SENDING
-                                                // =============================
-
-                                                Handler(
-                                                    Looper.getMainLooper()
-                                                ).post {
-
-                                                    radioState =
-                                                        RadioState.SENDING
-                                                }
-
-
-                                                val message =
-                                                    Message(
-
-                                                        id =
-                                                            "msg-" +
-                                                                    UUID
-                                                                        .randomUUID()
-                                                                        .toString(),
-
-                                                        type =
-                                                            "NORMAL",
-
-                                                        language =
-                                                            speakingLanguage.code,
-
-                                                        timestamp =
-                                                            System
-                                                                .currentTimeMillis(),
-
-                                                        text =
-                                                            text
-                                                    )
-
-
-                                                Log.d(
-                                                    "BLUETOOTH",
-                                                    "Sending message: $text"
-                                                )
-
-
-                                                val success =
-                                                    communicationService
-                                                        .sendMessage(
-                                                            message
-                                                        )
-
-
-                                                if (success) {
-
-                                                    Log.d(
-                                                        "BLUETOOTH",
-                                                        "Message acknowledged"
-                                                    )
-
-                                                    Handler(
-                                                        Looper.getMainLooper()
-                                                    ).post {
-
-                                                        radioState =
-                                                            RadioState.READY
-                                                    }
-
-                                                } else {
-
-                                                    Log.e(
-                                                        "BLUETOOTH",
-                                                        "Message failed"
-                                                    )
-
-                                                    Handler(
-                                                        Looper.getMainLooper()
-                                                    ).post {
-
-                                                        radioState =
-                                                            RadioState.ERROR
-                                                    }
-                                                }
-
-                                            } catch (
-                                                e: SecurityException
-                                            ) {
-
-                                                Log.e(
-                                                    "RADIO",
-                                                    "Microphone permission error",
-                                                    e
-                                                )
-
-                                                Handler(
-                                                    Looper.getMainLooper()
-                                                ).post {
-
-                                                    radioState =
-                                                        RadioState.ERROR
-                                                }
-
-                                            } catch (
-                                                e: Exception
-                                            ) {
-
-                                                Log.e(
-                                                    "RADIO",
-                                                    "Speech pipeline failed",
-                                                    e
-                                                )
-
-                                                Handler(
-                                                    Looper.getMainLooper()
-                                                ).post {
-
-                                                    radioState =
-                                                        RadioState.ERROR
-                                                }
-                                            }
+                                            radioState =
+                                                RadioState.ERROR
                                         }
+                                    )
                                 }
                             },
 
-                            // -----------------------------------------
-                            // STOP TALKING
-                            // -----------------------------------------
 
                             onStopTalking = {
 
-                                if (
-                                    radioState ==
-                                    RadioState.LISTENING
-                                ) {
+                                stopRecording()
+                            },
 
-                                    Log.d(
-                                        "RADIO",
-                                        "Talk button released early - stopping recording"
+
+                            onHistoryClick = {
+
+                                /*
+                                 * History integration is next.
+                                 */
+                            },
+
+
+                            onSettingsClick = {
+
+                                screen =
+                                    AppScreen.SETTINGS
+                            },
+
+
+                            onAboutClick = {
+
+                                screen =
+                                    AppScreen.ABOUT
+                            },
+
+
+                            onLeaveRoom = {
+
+                                try {
+
+                                    roomManager.leaveRoom(
+
+                                        roomId =
+                                            activeRoomId,
+
+                                        memberId =
+                                            encryptionManager
+                                                .localNodeId
                                     )
 
-                                    try {
-                                        audioRecorder.stop()
-                                    } catch (e: Exception) {
-                                        Log.w(
-                                            "RADIO",
-                                            "Error stopping audioRecorder",
-                                            e
-                                        )
-                                    }
+                                } catch (
+                                    e: Exception
+                                ) {
+
+                                    Log.e(
+                                        "ROOM",
+                                        "Failed to leave room",
+                                        e
+                                    )
                                 }
+
+
+                                activeRoomId =
+                                    ""
+
+                                activeRoomName =
+                                    ""
+
+                                roomParticipantCount =
+                                    0
+
+
+                                radioState =
+                                    RadioState.READY
+
+
+                                screen =
+                                    AppScreen.ROOM
                             }
                         )
                     }
@@ -1046,16 +1261,18 @@ class MainActivity : ComponentActivity() {
                                     AppScreen.RADIO
                             },
 
+
+                            onConnectedDeviceClick = {
+
+                                screen =
+                                    AppScreen.CONNECT
+                            },
+
+
                             onAboutClick = {
 
                                 screen =
                                     AppScreen.ABOUT
-                            },
-
-                            onHowItWorksClick = {
-
-                                screen =
-                                    AppScreen.HOW_IT_WORKS
                             }
                         )
                     }
@@ -1073,29 +1290,6 @@ class MainActivity : ComponentActivity() {
 
                                 screen =
                                     AppScreen.SETTINGS
-                            },
-
-                            onHowItWorks = {
-
-                                screen =
-                                    AppScreen.HOW_IT_WORKS
-                            }
-                        )
-                    }
-
-
-                    // =================================================
-                    // HOW IT WORKS
-                    // =================================================
-
-                    AppScreen.HOW_IT_WORKS -> {
-
-                        HowItWorksScreen(
-
-                            onBack = {
-
-                                screen =
-                                    AppScreen.SETTINGS
                             }
                         )
                     }
@@ -1103,29 +1297,74 @@ class MainActivity : ComponentActivity() {
 
 
                 // =================================================
-                // BACK HANDLER
+                // BACK BUTTON
                 // =================================================
 
                 BackHandler(
+
                     enabled =
                         screen !=
                                 AppScreen.SPLASH
+
                 ) {
 
                     screen =
+
                         when (screen) {
 
-                            AppScreen.SETTINGS ->
+                            AppScreen.CREATE_ROOM -> {
+
+                                roomCreationError =
+                                    null
+
+                                AppScreen.ROOM
+                            }
+
+
+                            AppScreen.JOIN_ROOM -> {
+
+                                AppScreen.ROOM
+                            }
+
+
+                            AppScreen.ROOM_SESSION -> {
+
+                                activeRoomId =
+                                    ""
+
+                                activeRoomName =
+                                    ""
+
+                                roomParticipantCount =
+                                    0
+
+                                AppScreen.ROOM
+                            }
+
+
+                            AppScreen.ROOM -> {
+
                                 AppScreen.RADIO
+                            }
 
-                            AppScreen.ABOUT ->
+
+                            AppScreen.SETTINGS -> {
+
+                                AppScreen.RADIO
+                            }
+
+
+                            AppScreen.ABOUT -> {
+
                                 AppScreen.SETTINGS
+                            }
 
-                            AppScreen.HOW_IT_WORKS ->
-                                AppScreen.SETTINGS
 
-                            AppScreen.CONNECTING ->
+                            AppScreen.CONNECTING -> {
+
                                 AppScreen.CONNECT
+                            }
+
 
                             AppScreen.RADIO -> {
 
@@ -1135,8 +1374,23 @@ class MainActivity : ComponentActivity() {
                                 AppScreen.CONNECT
                             }
 
-                            else ->
-                                AppScreen.CONNECT
+
+                            AppScreen.CONNECT -> {
+
+                                AppScreen.PERMISSIONS
+                            }
+
+
+                            AppScreen.PERMISSIONS -> {
+
+                                AppScreen.PERMISSIONS
+                            }
+
+
+                            AppScreen.SPLASH -> {
+
+                                AppScreen.SPLASH
+                            }
                         }
                 }
             }
@@ -1144,11 +1398,212 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    // =====================================================
-    // PAIRED DEVICE NAMES
-    // =====================================================
+    // =========================================================
+    // RECORDING PIPELINE
+    // =========================================================
 
-    private fun getPairedDeviceNames(): List<String> {
+    private fun startRecording(
+
+        type: String,
+
+        targetRoomId: String?,
+
+        onFinished: () -> Unit,
+
+        onError: () -> Unit
+    ) {
+
+        if (
+            recordingJob?.isActive == true
+        ) {
+
+            return
+        }
+
+
+        recordingJob =
+            communicationScope.launch(
+                Dispatchers.Default
+            ) {
+
+                try {
+
+                    Handler(
+                        Looper.getMainLooper()
+                    ).post {
+
+                        // UI observes this.
+                        // Actual state transitions occur below.
+                    }
+
+
+                    // =================================================
+                    // RECORD
+                    // =================================================
+
+                    val audio =
+                        audioRecorder.record(
+                            3000
+                        )
+
+
+                    Handler(
+                        Looper.getMainLooper()
+                    ).post {
+
+                        // Processing state.
+                        // This is visible to Compose.
+                    }
+
+
+                    // =================================================
+                    // STT
+                    // =================================================
+
+                    val text =
+                        sttEngine.transcribe(
+                            audio
+                        )
+
+
+                    if (
+                        text.isBlank()
+                    ) {
+
+                        Handler(
+                            Looper.getMainLooper()
+                        ).post {
+
+                            onFinished()
+                        }
+
+                        return@launch
+                    }
+
+
+                    // =================================================
+                    // MESSAGE
+                    // =================================================
+
+                    val message =
+                        Message(
+
+                            id =
+                                "msg-" +
+                                        UUID
+                                            .randomUUID()
+                                            .toString(),
+
+                            type =
+                                type,
+
+                            language =
+                                Language.HINDI.code,
+
+                            timestamp =
+                                System.currentTimeMillis(),
+
+                            text =
+                                text
+                        )
+
+
+                    // =================================================
+                    // SEND
+                    // =================================================
+
+                    if (
+                        type == "NORMAL"
+                    ) {
+
+                        communicationService
+                            .sendMessage(
+                                message
+                            )
+
+                    } else {
+
+                        /*
+                         * Room broadcast is intentionally not
+                         * connected to CommunicationService yet.
+                         *
+                         * The next backend step is:
+                         *
+                         * RoomProtocol
+                         *     ↓
+                         * RoomManager
+                         *     ↓
+                         * EncryptionManager
+                         *     ↓
+                         * CommunicationService
+                         */
+
+                        Log.d(
+                            "ROOM",
+                            "Prepared Room message: ${message.text}"
+                        )
+                    }
+
+
+                    Handler(
+                        Looper.getMainLooper()
+                    ).post {
+
+                        onFinished()
+                    }
+
+
+                } catch (
+                    e: Exception
+                ) {
+
+                    Log.e(
+                        "RADIO",
+                        "Recording pipeline failed",
+                        e
+                    )
+
+
+                    Handler(
+                        Looper.getMainLooper()
+                    ).post {
+
+                        onError()
+                    }
+                }
+            }
+    }
+
+
+    // =========================================================
+    // STOP RECORDING
+    // =========================================================
+
+    private fun stopRecording() {
+
+        try {
+
+            audioRecorder.stop()
+
+        } catch (
+            e: Exception
+        ) {
+
+            Log.w(
+                "AUDIO",
+                "Failed to stop recording",
+                e
+            )
+        }
+    }
+
+
+    // =========================================================
+    // PAIRED DEVICE NAMES
+    // =========================================================
+
+    private fun getPairedDeviceNames():
+            List<String> {
 
         return try {
 
@@ -1168,7 +1623,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-        } catch (e: Exception) {
+        } catch (
+            e: Exception
+        ) {
 
             Log.e(
                 "BLUETOOTH",
@@ -1181,9 +1638,9 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    // =====================================================
-    // FIND PAIRED DEVICE
-    // =====================================================
+    // =========================================================
+    // FIND DEVICE
+    // =========================================================
 
     private fun findPairedDevice(
         deviceName: String
@@ -1197,7 +1654,8 @@ class MainActivity : ComponentActivity() {
 
                     try {
 
-                        device.name == deviceName
+                        device.name ==
+                                deviceName
 
                     } catch (
                         _: SecurityException
@@ -1207,11 +1665,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-        } catch (e: Exception) {
+        } catch (
+            e: Exception
+        ) {
 
             Log.e(
                 "BLUETOOTH",
-                "Failed to find Bluetooth device",
+                "Failed to find device",
                 e
             )
 
@@ -1220,43 +1680,63 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    // =====================================================
+    // =========================================================
     // CLEANUP
-    // =====================================================
+    // =========================================================
 
     override fun onDestroy() {
 
-        Log.d(
-            "APP_LIFECYCLE",
-            "MainActivity destroyed"
-        )
+        recordingJob?.cancel()
+
 
         try {
-            recordingJob?.cancel()
-        } catch (_: Exception) {
-        }
 
-        try {
             audioRecorder.stop()
+
         } catch (_: Exception) {
         }
 
+
         try {
+
             sttEngine.release()
+
         } catch (_: Exception) {
         }
 
+
         try {
+
             ttsEngine.release()
+
         } catch (_: Exception) {
         }
 
+
         try {
-            communicationService.disconnect()
+
+            communicationService
+                .disconnect()
+
         } catch (_: Exception) {
         }
+
+
+        /*
+         * Clear in-memory encryption keys when the
+         * application process is being destroyed.
+         */
+        try {
+
+            encryptionManager
+                .clearAllKeys()
+
+        } catch (_: Exception) {
+        }
+
 
         communicationScope.cancel()
+
 
         super.onDestroy()
     }

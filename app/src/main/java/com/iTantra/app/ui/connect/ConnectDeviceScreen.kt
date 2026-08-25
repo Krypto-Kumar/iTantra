@@ -2,6 +2,8 @@ package com.iTantra.app.ui.connect
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -30,124 +32,156 @@ fun ConnectDeviceScreen(
     ) {
 
         Spacer(
-            modifier = Modifier.height(48.dp)
+            modifier = Modifier.height(42.dp)
         )
 
-        Text(
-            text = "Connect Device",
-            color = ITantraText,
-            fontSize = 27.sp,
-            fontWeight = FontWeight.Medium
-        )
+
+        // HEADER
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Text(
+                text = "Connect Device",
+                color = ITantraText,
+                fontSize = 27.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+
+
+            // SCAN AGAIN - TOP RIGHT
+            TextButton(
+                onClick = onScanAgain
+            ) {
+
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Scan Again",
+                    tint = ITantraGreen,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                Spacer(
+                    modifier = Modifier.width(5.dp)
+                )
+
+                Text(
+                    text = "Scan",
+                    color = ITantraGreen,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
 
         Spacer(
             modifier = Modifier.height(8.dp)
         )
 
+
         Text(
             text = "Turn on Bluetooth to connect with nearby devices.",
             color = ITantraSecondaryText,
-            fontSize = 14.sp
+            fontSize = 14.sp,
+            lineHeight = 21.sp
         )
+
 
         Spacer(
-            modifier = Modifier.height(26.dp)
+            modifier = Modifier.height(24.dp)
         )
 
+
+        // BLUETOOTH STATUS
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     ITantraLightGreen,
-                    RoundedCornerShape(14.dp)
+                    RoundedCornerShape(16.dp)
                 )
-                .padding(16.dp),
+                .padding(
+                    horizontal = 18.dp,
+                    vertical = 18.dp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
 
             Icon(
                 imageVector = Icons.Default.Bluetooth,
                 contentDescription = null,
-                tint = ITantraGreen
+                tint = ITantraGreen,
+                modifier = Modifier.size(28.dp)
             )
 
+
             Spacer(
-                modifier = Modifier.width(12.dp)
+                modifier = Modifier.width(14.dp)
             )
+
 
             Text(
                 text = "Bluetooth",
                 color = ITantraText,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
 
+
             Text(
                 text = "●  On",
                 color = ITantraSuccess,
-                fontSize = 13.sp
+                fontSize = 14.sp
             )
         }
+
 
         Spacer(
             modifier = Modifier.height(28.dp)
         )
 
+
         Text(
             text = "Nearby Devices",
             color = ITantraSecondaryText,
-            fontSize = 13.sp
+            fontSize = 14.sp
         )
+
 
         Spacer(
             modifier = Modifier.height(12.dp)
         )
 
-        devices.forEach { device ->
 
-            DeviceCard(
-                deviceName = device,
-                onClick = {
-                    onDeviceClick(device)
-                }
-            )
-
-            Spacer(
-                modifier = Modifier.height(10.dp)
-            )
-        }
-
-        Spacer(
-            modifier = Modifier.weight(1f)
-        )
-
-        OutlinedButton(
-            onClick = onScanAgain,
+        // SCROLLABLE DEVICE LIST
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(18.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = ITantraGreen
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(
+                bottom = 24.dp
             )
         ) {
 
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = null
-            )
+            items(
+                items = devices,
+                key = { device ->
+                    device
+                }
+            ) { device ->
 
-            Spacer(
-                modifier = Modifier.width(8.dp)
-            )
-
-            Text(
-                text = "Scan Again"
-            )
+                DeviceCard(
+                    deviceName = device,
+                    onClick = {
+                        onDeviceClick(device)
+                    }
+                )
+            }
         }
-
-        Spacer(
-            modifier = Modifier.height(28.dp)
-        )
     }
 }

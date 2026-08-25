@@ -19,7 +19,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Main application entry point for iTantra transport layer.
- * Provides clean boundary for future STT (sendMessage) and TTS (incomingMessages).
+ * Provides clean boundary for STT (sendMessage), TTS (incomingMessages),
+ * and Room signalling (incomingRoomFrames / sendRoomSignalEnvelope).
  *
  * Features:
  * - Clean STT/TTS isolation
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - Bounded retry mechanism (MAX_RETRIES = 3)
  * - In-memory duplicate filtering by message ID
  * - Ordered stream processing
+ * - ROOM_SIGNAL frames routed separately from DATA speech frames
  */
 class CommunicationService(
     private val scope: CoroutineScope,
@@ -37,11 +39,20 @@ class CommunicationService(
 
     val connectionState: StateFlow<ConnectionState> = bluetoothManager.connectionState
 
+    // ── Speech / text message flows ──────────────────────────────────────
     private val _incomingMessages = MutableSharedFlow<Message>(extraBufferCapacity = 64)
     val incomingMessages: SharedFlow<Message> = _incomingMessages.asSharedFlow()
 
     private val _sendFailures = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val sendFailures: SharedFlow<String> = _sendFailures.asSharedFlow()
+
+    // ── Room signalling flow ─────────────────────────────────────────────
+    /**
+     * Emits raw room signal JSON strings received from the connected peer.
+     * Consumed by [com.iTantra.app.room.RoomCommunicationBridge].
+     */
+    private val _incomingRoomFrames = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val incomingRoomFrames: SharedFlow<String> = _incomingRoomFrames.asSharedFlow()
 
     // Map of messageId -> CompletableDeferred<Unit> waiting for ACK
     private val pendingAcks = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
@@ -78,7 +89,7 @@ class CommunicationService(
 
     /**
      * Listens for raw incoming framed lines from [BluetoothManager], deserializes envelopes,
-     * handles ACKs, filters duplicates, and emits new valid messages.
+     * handles ACKs, routes ROOM_SIGNAL frames, filters duplicates, and emits new valid messages.
      */
     private fun startIncomingFrameProcessor() {
         processJob = scope.launch(Dispatchers.Default) {
@@ -91,6 +102,7 @@ class CommunicationService(
                             pendingAcks[ackId]?.complete(Unit)
                         }
                     }
+
                     ProtocolMessageType.DATA -> {
                         val message = envelope.message ?: return@collect
 
@@ -101,6 +113,13 @@ class CommunicationService(
                         val isNewMessage = processedMessageIds.add(message.id)
                         if (isNewMessage) {
                             _incomingMessages.emit(message)
+                        }
+                    }
+
+                    ProtocolMessageType.ROOM_SIGNAL -> {
+                        // Route raw room frame JSON to RoomCommunicationBridge for processing
+                        envelope.roomFrame?.let { frame ->
+                            _incomingRoomFrames.emit(frame)
                         }
                     }
                 }
@@ -125,10 +144,10 @@ class CommunicationService(
 
     /**
      * Transmits a logical [Message] over RFCOMM with bounded retries and ACK wait.
-     * Called by STT or typed user message interface.
+     * Called by STT pipeline or room broadcast.
      *
-     * @param message Logical data model containing id, language, timestamp, and text
-     * @return Boolean true if message was acknowledged, false if failed after max retries
+     * @param message Logical data model containing id, language, timestamp, and text.
+     * @return Boolean true if message was acknowledged, false if failed after max retries.
      */
     suspend fun sendMessage(message: Message): Boolean = withContext(Dispatchers.IO) {
         if (connectionState.value != ConnectionState.CONNECTED) {
@@ -153,7 +172,6 @@ class CommunicationService(
             val sendSuccess = bluetoothManager.sendRawBytes(payloadBytes)
             if (sendSuccess) {
                 try {
-                    // Wait for ACK with timeout
                     kotlinx.coroutines.withTimeout(ackTimeoutMs) {
                         ackDeferred.await()
                     }
@@ -175,6 +193,18 @@ class CommunicationService(
 
         return@withContext ackReceived
     }
+
+    /**
+     * Sends a pre-built [ProtocolEnvelope] with type [ProtocolMessageType.ROOM_SIGNAL]
+     * directly over the RFCOMM stream. Used by [com.iTantra.app.room.RoomCommunicationBridge].
+     * Room signal frames do not use the ACK/retry mechanism.
+     */
+    suspend fun sendRoomSignalEnvelope(envelope: ProtocolEnvelope): Boolean =
+        withContext(Dispatchers.IO) {
+            if (connectionState.value != ConnectionState.CONNECTED) return@withContext false
+            val bytes = MessageSerializer.serializeEnvelopeToBytes(envelope)
+            bluetoothManager.sendRawBytes(bytes)
+        }
 
     /**
      * Clears processed duplicate ID history.

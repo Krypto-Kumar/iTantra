@@ -6,6 +6,11 @@ import java.nio.charset.StandardCharsets
 /**
  * MessageSerializer handles framing-aware JSON serialization and deserialization
  * using strict UTF-8 encoding end-to-end to preserve Indic character sets.
+ *
+ * Supports three envelope types:
+ * - DATA: application speech/text messages
+ * - ACK: delivery acknowledgements
+ * - ROOM_SIGNAL: room join/leave/key-share control frames
  */
 object MessageSerializer {
 
@@ -26,6 +31,10 @@ object MessageSerializer {
         if (envelope.message != null) {
             val msgJson = serializeMessageToJson(envelope.message)
             json.put("message", msgJson)
+        }
+
+        if (envelope.roomFrame != null) {
+            json.put("roomFrame", envelope.roomFrame)
         }
 
         return json.toString() + DELIMITER
@@ -83,11 +92,16 @@ object MessageSerializer {
                     deserializeMessageFromJsonObject(json.getJSONObject("message"))
                 } else null
 
+                val roomFrame = if (json.has("roomFrame") && !json.isNull("roomFrame")) {
+                    json.getString("roomFrame")
+                } else null
+
                 ProtocolEnvelope(
                     envelopeId = envelopeId,
                     type = type,
                     ackMessageId = ackMessageId,
-                    message = message
+                    message = message,
+                    roomFrame = roomFrame
                 )
             } else if (json.has("id") && json.has("text")) {
                 // Direct Message fallback - wrap in DATA envelope automatically

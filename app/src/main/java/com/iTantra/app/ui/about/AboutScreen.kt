@@ -16,8 +16,7 @@ import com.iTantra.app.ui.theme.*
 
 @Composable
 fun AboutScreen(
-    onBack: () -> Unit,
-    onHowItWorks: () -> Unit
+    onBack: () -> Unit
 ) {
 
     Column(
@@ -30,6 +29,10 @@ fun AboutScreen(
         Spacer(
             modifier = Modifier.height(28.dp)
         )
+
+        // =====================================================
+        // HEADER
+        // =====================================================
 
         Row(
             verticalAlignment = Alignment.CenterVertically
@@ -54,9 +57,15 @@ fun AboutScreen(
             )
         }
 
+
         Spacer(
             modifier = Modifier.height(50.dp)
         )
+
+
+        // =====================================================
+        // APP NAME
+        // =====================================================
 
         Text(
             text = "iTANTRA",
@@ -68,6 +77,12 @@ fun AboutScreen(
             )
         )
 
+
+        Spacer(
+            modifier = Modifier.height(4.dp)
+        )
+
+
         Text(
             text = "Offline Multilingual Communication",
             color = ITantraSecondaryText,
@@ -77,9 +92,11 @@ fun AboutScreen(
             )
         )
 
+
         Spacer(
             modifier = Modifier.height(8.dp)
         )
+
 
         Text(
             text = "Version 1.0.0",
@@ -90,9 +107,15 @@ fun AboutScreen(
             )
         )
 
+
         Spacer(
             modifier = Modifier.height(48.dp)
         )
+
+
+        // =====================================================
+        // ABOUT CARD
+        // =====================================================
 
         Surface(
             color = ITantraSurface,
@@ -111,9 +134,11 @@ fun AboutScreen(
                     fontSize = 16.sp
                 )
 
+
                 Spacer(
                     modifier = Modifier.height(12.dp)
                 )
+
 
                 Text(
                     text = "iTANTRA enables multilingual voice communication without internet or cellular connectivity by converting speech into lightweight text, transmitting it between nearby devices, and reconstructing speech on the receiving device.",
@@ -124,29 +149,15 @@ fun AboutScreen(
             }
         }
 
-        Spacer(
-            modifier = Modifier.height(18.dp)
-        )
-
-        Button(
-            onClick = onHowItWorks,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = ITantraGreen
-            )
-        ) {
-
-            Text(
-                text = "How It Works"
-            )
-        }
 
         Spacer(
-            modifier = Modifier.height(18.dp)
+            modifier = Modifier.height(22.dp)
         )
+
+
+        // =====================================================
+        // ISRO PROBLEM STATEMENT
+        // =====================================================
 
         Surface(
             color = ITantraLightGreen,
@@ -163,6 +174,12 @@ fun AboutScreen(
                     color = ITantraSecondaryText,
                     fontSize = 12.sp
                 )
+
+
+                Spacer(
+                    modifier = Modifier.height(5.dp)
+                )
+
 
                 Text(
                     text = "26173",
